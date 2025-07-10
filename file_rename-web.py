@@ -3,28 +3,6 @@ import pandas as pd
 import os
 import shutil
 from io import StringIO
-import tkinter as tk
-from tkinter import filedialog
-import subprocess
-
-# Set working directory to script folder (optional but helps with relative paths)
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
-# ----------------------
-# Folder picker with tkinter
-# ----------------------
-def pick_folder():
-    try:
-        result = subprocess.run(
-            ["python", "folder_picker.py"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return result.stdout.strip()
-    except Exception as e:
-        st.error(f"Failed to open folder picker: {e}")
-        return ""
 
 # ----------------------
 # Find matching .mp4 file in source dir
@@ -64,13 +42,13 @@ def main():
 
     st.set_page_config(page_title="Playblast Renamer", layout="centered")
     st.title("📦 Playblast Renamer")
-    st.caption("Upload CSV, select folders, and export renamed MP4 files effortlessly.")
+    st.caption("Upload CSV, enter folder paths, and export renamed MP4 files.")
 
     with st.expander("📘 Instructions", expanded=False):
         st.markdown("""
         1. **Upload CSV** that contains `RM##` and `File Name` columns.
-        2. **Pick Source Folder** where original `.mp4` files are located.
-        3. **Pick Destination Folder** where renamed files will be saved.
+        2. **Enter Source Folder Path** where original `.mp4` files are located.
+        3. **Enter Destination Folder Path** where renamed files will be saved.
         4. **Click Process** to copy and rename files like `RM101_ShotA.mp4`.
         """)
 
@@ -92,23 +70,11 @@ def main():
             st.error(f"Error reading CSV: {e}")
             return
 
-    # Source folder picker
-    if st.button("📂 Pick Source Folder"):
-        selected = pick_folder()
-        if selected:
-            st.session_state["source_folder"] = selected
-    source_folder = st.session_state.get("source_folder", "")
-    st.text(f"Source Folder: {source_folder or 'Not selected'}")
+    # Manual text input for folders (Cloud compatible)
+    source_folder = st.text_input("📂 Enter Source Folder Path")
+    dest_folder = st.text_input("💾 Enter Destination Folder Path")
 
-    # Destination folder picker
-    if st.button("💾 Pick Destination Folder"):
-        selected = pick_folder()
-        if selected:
-            st.session_state["dest_folder"] = selected
-    dest_folder = st.session_state.get("dest_folder", "")
-    st.text(f"Destination Folder: {dest_folder or 'Not selected'}")
-
-    # Process button
+    # Process files
     if st.button("🚀 Process Files") and rows and source_folder and dest_folder:
         with st.spinner("Processing files..."):
             copied = 0
@@ -133,7 +99,6 @@ def main():
                     logs.append(f"❌ Not found: {base_filename}.mp4")
                     missing.append(base_filename)
 
-        # Summary
         st.success(f"✅ Done: {copied} files copied.")
         if missing:
             st.warning(f"⚠️ Missing files ({len(missing)}):")
@@ -144,7 +109,6 @@ def main():
 
         with st.expander("🧾 Full Log"):
             st.text("\n".join(logs))
-
 
 if __name__ == "__main__":
     main()
