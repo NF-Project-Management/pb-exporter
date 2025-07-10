@@ -3,7 +3,32 @@ import pandas as pd
 import os
 import shutil
 from io import StringIO
+import tkinter as tk
+from tkinter import filedialog
+import subprocess
 
+# Set working directory to script folder (optional but helps with relative paths)
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+# ----------------------
+# Folder picker with tkinter
+# ----------------------
+def pick_folder():
+    try:
+        result = subprocess.run(
+            ["python", "folder_picker.py"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        st.error(f"Failed to open folder picker: {e}")
+        return ""
+
+# ----------------------
+# Find matching .mp4 file in source dir
+# ----------------------
 def find_file(root_folder, base_name):
     base_lower = base_name.lower()
     for root, _, files in os.walk(root_folder):
@@ -12,6 +37,9 @@ def find_file(root_folder, base_name):
                 return os.path.join(root, f)
     return None
 
+# ----------------------
+# Login screen
+# ----------------------
 def login_ui(password_hint=""):
     st.title("🔐 File Renamer - Login")
     if password_hint:
@@ -25,27 +53,28 @@ def login_ui(password_hint=""):
         else:
             st.error("Incorrect password. Try again.")
 
-
+# ----------------------
+# Main UI
+# ----------------------
 def main():
-    # Protect access with password
+    # Password gate
     if not st.session_state.get("authenticated", False):
-        login_ui(password_hint="Ask your supervisor.")  # Optional hint
+        login_ui(password_hint="Ask your supervisor.")
         return
-    
-    st.set_page_config(page_title="Playblast Renamer", layout="centered")
 
+    st.set_page_config(page_title="Playblast Renamer", layout="centered")
     st.title("📦 Playblast Renamer")
-    st.caption("Upload your CSV, select folders, and export renamed MP4 files effortlessly.")
+    st.caption("Upload CSV, select folders, and export renamed MP4 files effortlessly.")
 
     with st.expander("📘 Instructions", expanded=False):
         st.markdown("""
         1. **Upload CSV** that contains `RM##` and `File Name` columns.
-        2. **Enter Source Folder** where original `.mp4` files are located.
-        3. **Enter Destination Folder** where renamed files will be saved.
+        2. **Pick Source Folder** where original `.mp4` files are located.
+        3. **Pick Destination Folder** where renamed files will be saved.
         4. **Click Process** to copy and rename files like `RM101_ShotA.mp4`.
         """)
 
-    # --- CSV Upload ---
+    # Upload CSV
     uploaded_file = st.file_uploader("📄 Upload CSV File", type=["csv"])
     rows = []
 
@@ -54,27 +83,32 @@ def main():
             raw_lines = uploaded_file.read().decode("utf-8").splitlines()
             header_idx = next(i for i, line in enumerate(raw_lines) if "RM##" in line and "File Name" in line)
             df = pd.read_csv(StringIO("\n".join(raw_lines[header_idx:])))
-            
             if "RM##" not in df.columns or "File Name" not in df.columns:
                 st.error("CSV must contain 'RM##' and 'File Name' columns.")
                 return
-
             rows = [(row["RM##"].strip(), row["File Name"].strip()) for _, row in df.iterrows()]
             st.success(f"✅ Loaded {len(rows)} entries from CSV.")
-
         except Exception as e:
             st.error(f"Error reading CSV: {e}")
             return
 
-    # --- Folder Inputs ---
-    st.markdown("### 📂 Folder Selection")
-    col1, col2 = st.columns(2)
-    with col1:
-        source_folder = st.text_input("🔍 Source Folder Path", placeholder="e.g. C:/Projects/Exports")
-    with col2:
-        dest_folder = st.text_input("💾 Destination Folder Path", placeholder="e.g. D:/Playblasts")
+    # Source folder picker
+    if st.button("📂 Pick Source Folder"):
+        selected = pick_folder()
+        if selected:
+            st.session_state["source_folder"] = selected
+    source_folder = st.session_state.get("source_folder", "")
+    st.text(f"Source Folder: {source_folder or 'Not selected'}")
 
-    # --- Process Files ---
+    # Destination folder picker
+    if st.button("💾 Pick Destination Folder"):
+        selected = pick_folder()
+        if selected:
+            st.session_state["dest_folder"] = selected
+    dest_folder = st.session_state.get("dest_folder", "")
+    st.text(f"Destination Folder: {dest_folder or 'Not selected'}")
+
+    # Process button
     if st.button("🚀 Process Files") and rows and source_folder and dest_folder:
         with st.spinner("Processing files..."):
             copied = 0
@@ -92,25 +126,25 @@ def main():
                         logs.append(f"✅ Copied: {base_filename}.mp4 → {new_name}")
                         copied += 1
                     except Exception as e:
-                        msg = f"❌ Error copying {base_filename}: {e}"
-                        logs.append(msg)
-                        errors.append(msg)
+                        error_msg = f"❌ Error copying {base_filename}: {e}"
+                        logs.append(error_msg)
+                        errors.append(error_msg)
                 else:
                     logs.append(f"❌ Not found: {base_filename}.mp4")
                     missing.append(base_filename)
 
-        # --- Results ---
+        # Summary
         st.success(f"✅ Done: {copied} files copied.")
         if missing:
             st.warning(f"⚠️ Missing files ({len(missing)}):")
             st.text("\n".join(f"• {m}.mp4" for m in missing))
         if errors:
-            st.error(f"🚫 Errors occurred while copying:")
+            st.error("🚫 Errors occurred while copying:")
             st.text("\n".join(errors))
 
-        # --- Log Output ---
         with st.expander("🧾 Full Log"):
             st.text("\n".join(logs))
+
 
 if __name__ == "__main__":
     main()
