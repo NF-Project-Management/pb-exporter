@@ -1,11 +1,13 @@
 import streamlit as st
 import pandas as pd
 import os
+import zipfile
+import tempfile
 import shutil
-from io import StringIO
+from io import BytesIO, StringIO
 
 # ----------------------
-# Find matching .mp4 file in source dir
+# Find matching .mp4 file in extracted ZIP folder
 # ----------------------
 def find_file(root_folder, base_name):
     base_lower = base_name.lower()
@@ -41,24 +43,24 @@ def main():
         return
 
     st.set_page_config(page_title="Playblast Renamer", layout="centered")
-    st.title("📦 Playblast Renamer")
-    st.caption("Upload CSV, enter folder paths, and export renamed MP4 files.")
+    st.title("📦 Playblast Renamer (ZIP Version)")
+    st.caption("Upload a CSV and a ZIP of .mp4s. Get renamed files back in a ZIP.")
 
     with st.expander("📘 Instructions", expanded=False):
         st.markdown("""
-        1. **Upload CSV** that contains `RM##` and `File Name` columns.
-        2. **Enter Source Folder Path** where original `.mp4` files are located.
-        3. **Enter Destination Folder Path** where renamed files will be saved.
-        4. **Click Process** to copy and rename files like `RM101_ShotA.mp4`.
+        1. Upload a **CSV** file that includes `RM##` and `File Name` columns.
+        2. Upload a **ZIP file** of `.mp4` files to be renamed.
+        3. Click **Process**, and download the ZIP of renamed files.
         """)
 
     # Upload CSV
-    uploaded_file = st.file_uploader("📄 Upload CSV File", type=["csv"])
+    uploaded_csv = st.file_uploader("📄 Upload CSV File", type=["csv"])
+    uploaded_zip = st.file_uploader("📦 Upload ZIP of .mp4 Files", type=["zip"])
     rows = []
 
-    if uploaded_file:
+    if uploaded_csv:
         try:
-            raw_lines = uploaded_file.read().decode("utf-8").splitlines()
+            raw_lines = uploaded_csv.read().decode("utf-8").splitlines()
             header_idx = next(i for i, line in enumerate(raw_lines) if "RM##" in line and "File Name" in line)
             df = pd.read_csv(StringIO("\n".join(raw_lines[header_idx:])))
             if "RM##" not in df.columns or "File Name" not in df.columns:
@@ -70,45 +72,63 @@ def main():
             st.error(f"Error reading CSV: {e}")
             return
 
-    # Manual text input for folders (Cloud compatible)
-    source_folder = st.text_input("📂 Enter Source Folder Path")
-    dest_folder = st.text_input("💾 Enter Destination Folder Path")
-
-    # Process files
-    if st.button("🚀 Process Files") and rows and source_folder and dest_folder:
-        with st.spinner("Processing files..."):
+    if st.button("🚀 Process Files") and uploaded_zip and rows:
+        with st.spinner("Processing..."):
             copied = 0
             missing = []
             errors = []
             logs = []
 
-            for rm_code, base_filename in rows:
-                found_path = find_file(source_folder, base_filename)
-                if found_path:
-                    new_name = f"{rm_code}_{base_filename}.mp4"
-                    dest_path = os.path.join(dest_folder, new_name)
-                    try:
-                        shutil.copy(found_path, dest_path)
-                        logs.append(f"✅ Copied: {base_filename}.mp4 → {new_name}")
-                        copied += 1
-                    except Exception as e:
-                        error_msg = f"❌ Error copying {base_filename}: {e}"
-                        logs.append(error_msg)
-                        errors.append(error_msg)
-                else:
-                    logs.append(f"❌ Not found: {base_filename}.mp4")
-                    missing.append(base_filename)
+            # Temp folders
+            with tempfile.TemporaryDirectory() as extract_dir, tempfile.TemporaryDirectory() as output_dir:
+                # Extract uploaded zip
+                with zipfile.ZipFile(uploaded_zip, "r") as zip_ref:
+                    zip_ref.extractall(extract_dir)
 
-        st.success(f"✅ Done: {copied} files copied.")
-        if missing:
-            st.warning(f"⚠️ Missing files ({len(missing)}):")
-            st.text("\n".join(f"• {m}.mp4" for m in missing))
-        if errors:
-            st.error("🚫 Errors occurred while copying:")
-            st.text("\n".join(errors))
+                # Rename and copy files
+                for rm_code, base_filename in rows:
+                    found_path = find_file(extract_dir, base_filename)
+                    if found_path:
+                        new_name = f"{rm_code}_{base_filename}.mp4"
+                        dest_path = os.path.join(output_dir, new_name)
+                        try:
+                            shutil.copy(found_path, dest_path)
+                            logs.append(f"✅ Copied: {base_filename}.mp4 → {new_name}")
+                            copied += 1
+                        except Exception as e:
+                            error_msg = f"❌ Error copying {base_filename}: {e}"
+                            logs.append(error_msg)
+                            errors.append(error_msg)
+                    else:
+                        logs.append(f"❌ Not found: {base_filename}.mp4")
+                        missing.append(base_filename)
 
-        with st.expander("🧾 Full Log"):
-            st.text("\n".join(logs))
+                # Create ZIP to download
+                zip_buffer = BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+                    for f in os.listdir(output_dir):
+                        full_path = os.path.join(output_dir, f)
+                        zipf.write(full_path, arcname=f)
+
+                zip_buffer.seek(0)
+                st.success(f"✅ Done! {copied} files copied and renamed.")
+
+                st.download_button(
+                    label="📥 Download Renamed ZIP",
+                    data=zip_buffer,
+                    file_name="renamed_files.zip",
+                    mime="application/zip"
+                )
+
+            # Logs
+            if missing:
+                st.warning(f"⚠️ Missing files ({len(missing)}):")
+                st.text("\n".join(f"• {m}.mp4" for m in missing))
+            if errors:
+                st.error("🚫 Errors:")
+                st.text("\n".join(errors))
+            with st.expander("🧾 Full Log"):
+                st.text("\n".join(logs))
 
 if __name__ == "__main__":
     main()
